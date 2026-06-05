@@ -92,6 +92,56 @@ Categorize discovered configurations:
 - **Protective DNS / filtering:** RPZ, Pi-hole, Cisco Umbrella, Cloudflare Gateway, Quad9.
 - **Client settings:** resolv.conf, DHCP-distributed resolver addresses.
 
+### Step 1.5: Split-Horizon and Conditional Forwarding Evidence
+
+Before scoring DNSSEC, public exposure, or protective DNS bypass findings, determine whether the DNS estate uses multiple views or private zones. A private internal zone may intentionally be unsigned and invisible from public resolvers, while a public zone may have different answers than the VPN or corporate resolver view.
+
+**What to look for:**
+
+- BIND `view` blocks, Unbound `stub-zone` / `forward-zone`, CoreDNS `forward`, `rewrite`, `fallthrough`, or Kubernetes `stubDomains`.
+- Cloud private DNS resources such as Route 53 private hosted zones, Google Cloud private managed zones, Azure Private DNS zones, and VPC/virtual-network zone associations.
+- Conditional forwarders for internal suffixes that send queries to public resolvers or unmanaged partner resolvers.
+- VPN, DHCP, or device-management settings that distribute resolver addresses and DNS search suffixes.
+- Divergence between public, corporate, and VPN resolver answers for high-value names.
+
+**Patterns to check:**
+
+```
+# BIND split-horizon views and forwarding
+view "
+match-clients
+forwarders
+zone "
+
+# Unbound forwarding and local zones
+stub-zone:
+forward-zone:
+local-zone:
+
+# CoreDNS and Kubernetes DNS routing
+forward .
+rewrite
+fallthrough
+stubDomains
+
+# Cloud private DNS
+aws_route53_zone
+vpc_id
+private_zone
+google_dns_managed_zone
+visibility = "private"
+azurerm_private_dns_zone
+azurerm_private_dns_zone_virtual_network_link
+```
+
+**Evidence to collect for high-value names:**
+
+| Name | Public Resolver Answer | Corporate Resolver Answer | VPN/Client Answer | Expected Owner | Divergence Documented |
+|------|------------------------|---------------------------|-------------------|----------------|-----------------------|
+| api.example.com | CNAME api-prod.example.net | A 10.24.8.15 | A 10.24.8.15 | Platform Team | Yes/No |
+
+**Finding classification:** Conditional forwarders that send private suffixes to public resolvers are **High** if they leak internal names or bypass protective DNS logging/filtering. Undocumented split-horizon drift for production names is **Medium**. Unsigned non-delegated private zones should normally be **Informational** unless they are externally reachable, delegated from a public parent, or used as a trust boundary.
+
 ---
 
 ### Step 2: DNSSEC Deployment Review (NIST SP 800-81 Rev 2, Sections 4 and 5)
@@ -328,6 +378,12 @@ abcdef0123456789.dnscat.example.com TXT
 |----------|-------------------|--------------------|--------------|--------------|
 | ns1      | Enabled/Disabled  | DoT/DoH/Plaintext  | Yes/No       | Yes/No       |
 
+### Split-Horizon and Forwarding Evidence
+
+| Name or Zone | Public Resolver | Corporate Resolver | VPN/Client Resolver | Conditional Forwarder | Expected Divergence Documented |
+|--------------|-----------------|--------------------|---------------------|-----------------------|--------------------------------|
+| example.com  | <answer>        | <answer>           | <answer>            | Yes/No                | Yes/No                         |
+
 ### Findings
 
 #### [F-001] <Finding Title>
@@ -413,4 +469,5 @@ This skill processes DNS configuration files that may contain user-supplied zone
 
 ## Changelog
 
+- **1.0.1** -- Added split-horizon DNS, private-zone, conditional-forwarder, and multi-resolver evidence guidance.
 - **1.0.0** -- Initial release. Full coverage of NIST SP 800-81 Rev 2 and CIS Controls v8 Control 9.2 for DNS security review.
